@@ -40,7 +40,14 @@
 // you can modify this if you want
 #define SURE_FIN_TIMEOUT 4  // in number of times
 
+// how many times should we try to connect
 #define SURE_SYN_TIMEOUT 4
+
+// diffrence in time
+#define TIMESPEC_DIFF(t1, t2) \
+  ((t2.tv_nsec - t1.tv_nsec) + ((t2.tv_sec - t1.tv_sec) * 1000000000L))
+
+#define TIME_IN_MICRO(tv) (1000000000L * tv.tv_sec + tv.tv_nsec) / 1000L
 
 // this is the SURE segment
 // MODIFY THIS!!!
@@ -48,8 +55,7 @@ typedef struct sure_packet {
   // ADD HEADER FIELDS HERE
   // Sequence number of ack number (depending on which side is sending)
   unsigned int seq_ack_number;
-  unsigned char flags;  // [?|?|?|?|?|ACK|SYN|FIN]
-  unsigned short int length;
+  unsigned char flags;          // [?|?|?|?|?|ACK|SYN|FIN]
   char data[SURE_PACKET_SIZE];  // the payload
 } sure_packet_t;
 
@@ -60,10 +66,12 @@ typedef struct sure_packet {
 typedef struct sure_socket {
   // ADD OTHER VARIABLES HERE
   struct timespec timers[SURE_WINDOW];
+  int index_timer;
   pthread_mutex_t lock;
   pthread_t thread_id;
   int num;  // number of elements in the buffer
   int add;  // place to add next element
+  int start_window;
   sure_packet_t buffer[SURE_BUFFER];
   udt_socket_t udt;  // used by the lower-level protocol
 } sure_socket_t;

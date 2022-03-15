@@ -38,7 +38,62 @@ void *receiver_thread(void *param) { return NULL; }
 // thread that  receives acks and removes packets from the buffer, or that
 // retransmits if needed
 void *sender_thread(sure_socket_t *p) {
+  // sure_packet_t buf_packet;
+  int recv_status;
+  int send_status;
+  sure_packet_t last_ack;
+  unsigned char flags;
+  sure_packet_t packet;
+  unsigned long time_in_nano;
+  unsigned long time_in_micro;
+  unsigned long time_t1;
+  struct timespec tv;
+
   while (true) {
+    if (p->num == 0) {
+      continue;
+    }
+    // retransmitions
+    tv = p->timers[p->index_timer];
+    time_in_micro = TIME_IN_MICRO(tv);
+    clock_gettime(CLOCK_MONOTONIC, &tv);
+    time_t1 = TIME_IN_MICRO(tv);
+
+    // check if there is a timeout
+    if (time_t1 - time_in_micro >= SURE_TIMEOUT) {
+      // start retransmitting
+      udt_send(&p->udt, (char *)&p->buffer[p->start_window],
+               sizeof(p->buffer[p->start_window]));
+
+      continue;
+    }
+    // if no packet timed out , we can in the  spare time check for acks and
+    // move the window
+    udt_set_timeout(&p->udt, time_t1 - time_in_micro);
+    recv_status = udt_recv(&p->udt, (char *)&last_ack, sizeof(last_ack));
+    if (recv_status > 0) {
+      // lock the ressource
+      // CHECK FOR flags (FIN , SYN , ACK)
+      if (last_ack.flags & ACK == ACK) {
+        unsigned int ack_number = last_ack.seq_ack_number;
+        while (true) {
+          packet = p->buffer[p->start_window];
+          if (packet.seq_ack_number >= ack_number) {
+            break;
+          }
+          p->start_window = (p->start_window + 1) % SURE_BUFFER;
+          p->num--;
+          p->index_timer = (p->index_timer + 1) % SURE_WINDOW;
+          // try to send the not yet sent packet at the edge of the window
+          if (p->num >= SURE_WINDOW) {
+            send_status = udt_send(&p->udt, (char *)&p->buffer[p->add],
+                                   sizeof(p->buffer[p->add]));
+            clock_gettime(CLOCK_MONOTONIC, &p->timers[SURE_WINDOW]);
+            p->add++;
+          }
+        }
+      }
+    }
   }
   return;
 }
@@ -75,7 +130,6 @@ int sure_init(char *receiver, int port, int side, sure_socket_t *p) {
       fprintf(stderr, "Unable to connect after %d trys \n", SURE_SYN_TIMEOUT);
       return SURE_FAILURE;
     }
-
     switch (buf_packet.flags) {
       case SYN || ACK:
         printf("The receiver accepted the connextion \n");
