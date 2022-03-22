@@ -49,6 +49,8 @@
 
 #define TIME_IN_MICRO(tv) (1000000000L * tv.tv_sec + tv.tv_nsec) / 1000L
 
+#define NUMPACKETINWINDOW(p) p->num > SURE_WINDOW ? SURE_WINDOW : p->num
+
 // this is the SURE segment
 // MODIFY THIS!!!
 typedef struct sure_packet {
@@ -65,13 +67,15 @@ typedef struct sure_packet {
 // MODIFY THIS!!!
 typedef struct sure_socket {
   // ADD OTHER VARIABLES HERE
-  struct timespec timers[SURE_WINDOW];
-  int index_timer;
-  pthread_mutex_t lock;
+  struct timespec timer;
   pthread_t thread_id;
-  int num;  // number of elements in the buffer
-  int add;  // place to add next element
-  int start_window;
+  int num;               // number of elements in the buffer
+  int start_window;      // start of the window
+  int seq_number;        // seq of the next expected packet (for the send)
+                         // seq of the current sent packet (for the rev)
+  pthread_mutex_t lock;  /* mutex lock for buffer */
+  pthread_cond_t c_cons; /* consumer waits on this cond var */
+  pthread_cond_t c_prod; /* producer waits on this cond var */
   sure_packet_t buffer[SURE_BUFFER];
   udt_socket_t udt;  // used by the lower-level protocol
 } sure_socket_t;

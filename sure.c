@@ -15,8 +15,8 @@
 #include <string.h>
 #include <time.h>
 
-#define SYN 0b1
-#define ACK 0b10
+#define SYN 0b001
+#define ACK 0b010
 #define FIN 0b100
 
 int sure_read(sure_socket_t *s, char *msg, int msg_size) {
@@ -34,7 +34,50 @@ int sure_write(sure_socket_t *s, char *msg, int msg_size) {
   // away send the packets that fall within the window
 }
 // thread that receive packets and add them to the buffer
-void *receiver_thread(void *param) { return NULL; }
+void *receiver_thread(sure_socket_t *p) {
+  int recv_status;
+  sure_packet_t packet_recv;
+  sure_packet_t packet_sent;
+  int send_status;
+  int add_index;
+  while (true) {
+    recv_status = udt_recv(&p->udt, (char *)&packet_recv, sizeof(packet_recv));
+    if (recv_status > 0) {
+      if ((packet_recv.flags | SYN) == 0) {
+        // manage the lost of the syn/ack packet
+        packet_sent.flags = SYN | ACK;
+        packet_sent.seq_ack_number = packet_recv.seq_ack_number + 1;
+        udt_send(&p->udt, (char *)&packet_sent, sizeof(packet_sent));
+      }
+      // the sender wish to end the connexion
+      if ((packet_recv.flags | FIN) == 0) {
+        // Ending the connection means receiving a FIN packet, responding with
+        // an ack and then waiting for some time before tearing down the
+        // connection (in case the ack was lost and the sender re-transmits the
+        // FIN).
+      }
+      // here we know we received data therefor we should buffer it.
+      // first check if the right packet has arrived to us :
+      if (packet_recv.seq_ack_number == p->seq_number) {
+        // wait on the buffer to have space
+        add_index = p->start_window + p->num;
+        p->buffer[add_index % SURE_BUFFER] = packet_recv;
+        p->num++;
+        packet_sent.flags = ACK;
+        p->seq_number++;
+        packet_sent.seq_ack_number = p->seq_number;
+        udt_send(&p->udt, (char *)&packet_sent, sizeof(packet_sent));
+      } else {
+        // else we send a packet telling the sender the next packet we
+        // are expecting
+        packet_sent.flags = ACK;
+        packet_sent.seq_ack_number = p->seq_number;
+        udt_send(&p->udt, (char *)&packet_sent, sizeof(packet_sent));
+      }
+    }
+  }
+}
+
 // thread that  receives acks and removes packets from the buffer, or that
 // retransmits if needed
 void *sender_thread(sure_socket_t *p) {
@@ -42,60 +85,78 @@ void *sender_thread(sure_socket_t *p) {
   int recv_status;
   int send_status;
   sure_packet_t last_ack;
-  unsigned char flags;
   sure_packet_t packet;
-  unsigned long time_in_nano;
-  unsigned long time_in_micro;
-  unsigned long time_t1;
+  unsigned long timer_in_micro;
+  unsigned long current_time;
   struct timespec tv;
 
   while (true) {
-    if (p->num == 0) {
-      continue;
-    }
-    // retransmitions
-    tv = p->timers[p->index_timer];
-    time_in_micro = TIME_IN_MICRO(tv);
+    // nothing to if num of element is 0
+    if (p->num == 0) continue;
+
+    // retransmitions if needed
+    tv = p->timer;
+    timer_in_micro = TIME_IN_MICRO(tv);
     clock_gettime(CLOCK_MONOTONIC, &tv);
-    time_t1 = TIME_IN_MICRO(tv);
+    current_time = TIME_IN_MICRO(tv);
 
     // check if there is a timeout
-    if (time_t1 - time_in_micro >= SURE_TIMEOUT) {
-      // start retransmitting
-      udt_send(&p->udt, (char *)&p->buffer[p->start_window],
-               sizeof(p->buffer[p->start_window]));
-
-      continue;
+    if (current_time - timer_in_micro >= SURE_TIMEOUT) {
+      // start retransmitting all the window as defined in GO-BACK-N
+      // and reset the timer of the frame
+      int N = NUMPACKETINWINDOW(p);
+      int send_base = p->start_window;
+      for (int i = send_base; i < send_base + N; i++)
+        udt_send(&p->udt, (char *)&p->buffer[p->start_window],
+                 sizeof(p->buffer[p->start_window]));
+      clock_gettime(CLOCK_MONOTONIC, &p->timer);
     }
+
     // if no packet timed out , we can in the  spare time check for acks and
-    // move the window
-    udt_set_timeout(&p->udt, time_t1 - time_in_micro);
+    // move the window (the time we can afford to wait is
+    // current_time - current_time)
+
+    udt_set_timeout(&p->udt, current_time - timer_in_micro);
     recv_status = udt_recv(&p->udt, (char *)&last_ack, sizeof(last_ack));
     if (recv_status > 0) {
-      // lock the ressource
       // CHECK FOR flags (FIN , SYN , ACK)
-      if (last_ack.flags & ACK == ACK) {
+      if ((last_ack.flags | ACK) == 0) {
         unsigned int ack_number = last_ack.seq_ack_number;
+        // here we are sure that the window will move thus setting the timer of
+        // the new frame
+        clock_gettime(CLOCK_MONOTONIC, &p->timer);
+        pthread_mutex_lock(&p->lock);
         while (true) {
           packet = p->buffer[p->start_window];
-          if (packet.seq_ack_number >= ack_number) {
-            break;
-          }
+          // stop condition
+          if (ack_number <= packet.seq_ack_number) break;
+          // move the window
           p->start_window = (p->start_window + 1) % SURE_BUFFER;
-          p->num--;
-          p->index_timer = (p->index_timer + 1) % SURE_WINDOW;
           // try to send the not yet sent packet at the edge of the window
-          if (p->num >= SURE_WINDOW) {
-            send_status = udt_send(&p->udt, (char *)&p->buffer[p->add],
-                                   sizeof(p->buffer[p->add]));
-            clock_gettime(CLOCK_MONOTONIC, &p->timers[SURE_WINDOW]);
-            p->add++;
+          if (p->num > SURE_WINDOW) {
+            int last_packet_index =
+                (p->start_window + SURE_WINDOW - 1) % SURE_BUFFER;
+            udt_send(&p->udt, (char *)&p->buffer[last_packet_index],
+                     sizeof(p->buffer[last_packet_index]));
           }
+          // update the buffer
+          p->num--;
+          pthread_mutex_unlock(&p->lock);
         }
+      }
+      // we must end the connexion (we assume that no packet was sent from us
+      // after the fin.)
+      if ((last_ack.flags | FIN) == 0) {
+        if (p->num > 0) {
+          fprintf(stderr,
+                  "The sender wants to end the connexion but there is still "
+                  "packets in the buffer \n");
+        }
+        return NULL;
       }
     }
   }
-  return;
+  return NULL;
 }
 
 int sure_init(char *receiver, int port, int side, sure_socket_t *p) {
@@ -103,7 +164,8 @@ int sure_init(char *receiver, int port, int side, sure_socket_t *p) {
   // call udt_init
   int status = udt_init(receiver, port, side, &p->udt);
   if (status == UDT_FAILURE) return SURE_FAILURE;
-  p->add = 0, p->num = 0;
+  p->num = 0;
+  p->seq_number = 0;
   pthread_mutex_init(&p->lock, NULL);
 
   // start thread (the receiver will need a thread that receives packets and add
@@ -116,7 +178,7 @@ int sure_init(char *receiver, int port, int side, sure_socket_t *p) {
   if (side == SURE_SENDER) {
     udt_set_timeout(&p->udt, SURE_TIMEOUT);
     // send the syn packet to the receiver :
-    sure_packet_t syn_packet = {.seq_ack_number = 0, .flags = SYN};
+    sure_packet_t syn_packet = {.seq_ack_number = p->seq_number, .flags = SYN};
 
     for (int i = 0; i < SURE_SYN_TIMEOUT; i++) {
       send_status = udt_send(&p->udt, (char *)&syn_packet, sizeof(syn_packet));
@@ -130,6 +192,9 @@ int sure_init(char *receiver, int port, int side, sure_socket_t *p) {
       fprintf(stderr, "Unable to connect after %d trys \n", SURE_SYN_TIMEOUT);
       return SURE_FAILURE;
     }
+    // increase the seq_number since a packet has been sent and received
+    p->seq_number++;
+    // check for flags
     switch (buf_packet.flags) {
       case SYN || ACK:
         printf("The receiver accepted the connextion \n");
@@ -151,8 +216,10 @@ int sure_init(char *receiver, int port, int side, sure_socket_t *p) {
       fprintf(stderr, "OOPS something went wrong with the synchronisation  \n");
       return SURE_FAILURE;
     }
-    // sends a syn/ack for the synchronized connexion
-    sure_packet_t ack_packet = {.seq_ack_number = 0, .flags = ACK || SYN};
+    // sends a syn/ack for the synchronized connexion (if the packet was lost
+    // the receiver thread should manage the retransmition)
+    sure_packet_t ack_packet = {.seq_ack_number = buf_packet.seq_ack_number + 1,
+                                .flags = ACK || SYN};
     send_status = udt_send(&p->udt, (char *)&ack_packet, sizeof(ack_packet));
     if (pthread_create(&p->thread_id, NULL, receiver_thread, (void *)p) != 0) {
       fprintf(stderr, "Unable to create reveiver_thread thread\n");

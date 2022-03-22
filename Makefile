@@ -15,10 +15,10 @@ CFLAGS += -D_GNU_SOURCE -D_REENTRANT
 LDLIBS += -lpthread 
 
 copy: $(OBJ) $(OTHER_OBJ)
-	gcc $(LDLIBS) -o copy_file copy_file.o $(OBJ)
+	gcc $(LDLIBS) -o copy_file copy_file.o $(OBJ) $(LDLIBS)
 
 receive: $(OBJ) $(OTHER_OBJ)
-	gcc $(LDLIBS) -o receive_file receive_file.o $(OBJ)
+	gcc $(LDLIBS) -o receive_file receive_file.o $(OBJ) $(LDLIBS)
 
 test_init_sure: $(OBJ) $(OTHER_OBJ)
 	gcc $(LDLIBS) -o test_init_sure test_init_sure.o $(OBJ) $(LDLIBS)
