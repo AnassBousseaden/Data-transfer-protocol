@@ -15,10 +15,6 @@
 #include <string.h>
 #include <time.h>
 
-#define SYN 0b001
-#define ACK 0b010
-#define FIN 0b100
-
 int sure_read(sure_socket_t *s, char *msg, int msg_size) {
   // wait if there isn't anything in the buffer (we'll be signaled by the other
   // thread) if we are not connected, return 0 take as many packets as there are
@@ -32,6 +28,30 @@ int sure_write(sure_socket_t *s, char *msg, int msg_size) {
   // add them to the buffer (wait if the buffer is full)
   // must do a memory copy because the application buffer may be reused right
   // away send the packets that fall within the window
+  int nb_packets = msg_size / SURE_PACKET_SIZE + 1;
+  sure_packet_t packet;
+
+  for (int i = 0; i < nb_packets - 1; i++) {
+    while (s->num >= SURE_BUFFER) {
+      // wait on some condition (buffer space)
+    }
+    if (s->num < SURE_WINDOW) {  //      
+    sadd_index = (p->start_window + p->num) % SURE_BUFFER;
+
+      if (s->num == 0) {
+        clock_gettime(CLOCK_MONOTONIC, &s->timer);
+      }
+      memcpy(&packet.data, &msg[i * SURE_PACKET_SIZE], SURE_PACKET_SIZE);
+      packet.flags = 0;
+      packet.length = SURE_PACKET_SIZE;
+      packet.seq_ack_number = s->seq_number + 1;
+      s->seq_number++;
+      udt_send(&s->udt, (char *)&packet, sizeof(packet));
+      s->buffer[add_index] = packet;
+    } else {
+      // the packet does not fall withing the window
+    }
+  }
 }
 // thread that receive packets and add them to the buffer
 void *receiver_thread(sure_socket_t *p) {
@@ -60,8 +80,8 @@ void *receiver_thread(sure_socket_t *p) {
       // first check if the right packet has arrived to us :
       if (packet_recv.seq_ack_number == p->seq_number) {
         // wait on the buffer to have space
-        add_index = p->start_window + p->num;
-        p->buffer[add_index % SURE_BUFFER] = packet_recv;
+        add_index = (p->start_window + p->num) % SURE_BUFFER;
+        p->buffer[add_index] = packet_recv;
         p->num++;
         packet_sent.flags = ACK;
         p->seq_number++;
@@ -89,11 +109,14 @@ void *sender_thread(sure_socket_t *p) {
   unsigned long timer_in_micro;
   unsigned long current_time;
   struct timespec tv;
+  int FIN_cpt = 0;
 
   while (true) {
-    // nothing to if num of element is 0
+    // nothing to do if num of element is 0
+    // NOTE : use condition wait to pause this thread
     if (p->num == 0) continue;
 
+    if (FIN_cpt >= SURE_FIN_TIMEOUT) goto end;
     // retransmitions if needed
     tv = p->timer;
     timer_in_micro = TIME_IN_MICRO(tv);
@@ -106,6 +129,12 @@ void *sender_thread(sure_socket_t *p) {
       // and reset the timer of the frame
       int N = NUMPACKETINWINDOW(p);
       int send_base = p->start_window;
+
+      // manage the fin_cpt
+      if ((p->buffer[send_base].flags | FIN) == 0) {
+        FIN_cpt++;
+      }
+
       for (int i = send_base; i < send_base + N; i++)
         udt_send(&p->udt, (char *)&p->buffer[p->start_window],
                  sizeof(p->buffer[p->start_window]));
@@ -125,7 +154,6 @@ void *sender_thread(sure_socket_t *p) {
         // here we are sure that the window will move thus setting the timer of
         // the new frame
         clock_gettime(CLOCK_MONOTONIC, &p->timer);
-        pthread_mutex_lock(&p->lock);
         while (true) {
           packet = p->buffer[p->start_window];
           // stop condition
@@ -141,13 +169,13 @@ void *sender_thread(sure_socket_t *p) {
           }
           // update the buffer
           p->num--;
-          pthread_mutex_unlock(&p->lock);
         }
       }
       // we must end the connexion (we assume that no packet was sent from us
       // after the fin.)
       if ((last_ack.flags | FIN) == 0) {
-        if (p->num > 0) {
+      end:
+        if (p->num > 1) {
           fprintf(stderr,
                   "The sender wants to end the connexion but there is still "
                   "packets in the buffer \n");
@@ -233,4 +261,14 @@ void sure_close(sure_socket_t *s) {
   // end the connection (and wait until it is done)
   // call udt_close
   // call pthread_join for the thread
+  sure_packet_t fin_packet = {.flags = FIN};
+
+  // wait for the buffer to be empty and then send a FIN packet
+  // COND WAIT BUFFER EMPTY
+  udt_send(&s->udt, (char *)&fin_packet, sizeof(fin_packet));
+  // wait for the thread to end
+
+  pthread_join(s->thread_id, NULL);
+  udt_close(&s->udt);
+  // END
 }

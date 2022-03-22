@@ -51,15 +51,21 @@
 
 #define NUMPACKETINWINDOW(p) p->num > SURE_WINDOW ? SURE_WINDOW : p->num
 
+#define SYN 0b001
+#define ACK 0b010
+#define FIN 0b100
+
 // this is the SURE segment
 // MODIFY THIS!!!
-typedef struct sure_packet {
+typedef struct {
   // ADD HEADER FIELDS HERE
   // Sequence number of ack number (depending on which side is sending)
   unsigned int seq_ack_number;
-  unsigned char flags;          // [?|?|?|?|?|ACK|SYN|FIN]
+  unsigned char flags;  // [?|?|?|?|?|ACK|SYN|FIN]
+  unsigned short length;
   char data[SURE_PACKET_SIZE];  // the payload
 } sure_packet_t;
+
 
 // this is the struct the application will provide to all SURE calls,
 // it MUST hold all the variables related to the connection (you may
@@ -69,16 +75,20 @@ typedef struct sure_socket {
   // ADD OTHER VARIABLES HERE
   struct timespec timer;
   pthread_t thread_id;
-  int num;               // number of elements in the buffer
-  int start_window;      // start of the window
-  int seq_number;        // seq of the next expected packet (for the send)
-                         // seq of the current sent packet (for the rev)
-  pthread_mutex_t lock;  /* mutex lock for buffer */
-  pthread_cond_t c_cons; /* consumer waits on this cond var */
-  pthread_cond_t c_prod; /* producer waits on this cond var */
+  int num;                     // number of elements in the buffer
+  int start_window;            // start of the window
+  int seq_number;              // seq of the next expected packet (for the send)
+                               // seq of the current sent packet (for the rev)
+  pthread_mutex_t lock;        /* lock for buffer and ... */
+  pthread_cond_t empty_buffer; /* wait for the buffer to be empty */
+  pthread_cond_t space_buffer; /* wait for the buffer to have space */
   sure_packet_t buffer[SURE_BUFFER];
   udt_socket_t udt;  // used by the lower-level protocol
 } sure_socket_t;
+
+// SENDER :
+// need a condtion waiting for the buffer to be filled
+// need a lock on (BUFFER , NUM)
 
 // below are the interface the SURE protocol provides for applications
 // DO NO MODIFY!
