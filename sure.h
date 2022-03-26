@@ -53,11 +53,12 @@
 
 // this is the SURE segment
 // MODIFY THIS!!!
-typedef struct sure_packet {
+typedef struct {
   // ADD HEADER FIELDS HERE
   // Sequence number of ack number (depending on which side is sending)
   unsigned int seq_ack_number;
-  unsigned char flags;          // [?|?|?|?|?|ACK|SYN|FIN]
+  unsigned char flags;  // [?|?|?|?|?|ACK|SYN|FIN]
+  unsigned short int packet_size;
   char data[SURE_PACKET_SIZE];  // the payload
 } sure_packet_t;
 
@@ -69,13 +70,16 @@ typedef struct sure_socket {
   // ADD OTHER VARIABLES HERE
   struct timespec timer;
   pthread_t thread_id;
-  int num;               // number of elements in the buffer
-  int start_window;      // start of the window
-  int seq_number;        // seq of the next expected packet (for the send)
-                         // seq of the current sent packet (for the rev)
-  pthread_mutex_t lock;  /* mutex lock for buffer */
-  pthread_cond_t c_cons; /* consumer waits on this cond var */
-  pthread_cond_t c_prod; /* producer waits on this cond var */
+  int num;                     // number of elements in the buffer
+  int start_window;            // start of the window
+  int seq_number;              // seq of the next expected packet (for the send)
+                               // seq of the current sent packet (for the rev)
+  pthread_mutex_t lock;        /* mutex lock for buffer */
+  pthread_cond_t empty_buffer; /* condition signaling an empty buffer */
+  pthread_cond_t full_buffer;  /* condition signaling a full buffer */
+  pthread_cond_t space_buffer; /* condition signaling place in the buffer */
+  pthread_cond_t no_empty_buffer; /* condition signaling that the buffer is no
+                                     longer empty */
   sure_packet_t buffer[SURE_BUFFER];
   udt_socket_t udt;  // used by the lower-level protocol
 } sure_socket_t;
