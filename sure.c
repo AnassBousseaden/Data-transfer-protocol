@@ -15,10 +15,6 @@
 #include <string.h>
 #include <time.h>
 
-#define SYN 0b001
-#define ACK 0b010
-#define FIN 0b100
-
 int sure_read(sure_socket_t *s, char *msg, int msg_size) {
   // wait if there isn't anything in the buffer (we'll be signaled by the other
   // thread) if we are not connected, return 0 take as many packets as there are
@@ -134,6 +130,7 @@ void *sender_thread(sure_socket_t *p) {
   unsigned long timer_in_micro;
   unsigned long current_time;
   struct timespec tv;
+  int FIN_cpt = 0;
 
   while (true) {
     pthread_mutex_lock(&p->lock);
@@ -141,6 +138,7 @@ void *sender_thread(sure_socket_t *p) {
     // filled
     while (p->num == 0) pthread_cond_wait(&p->filled_buffer, &p->lock);
 
+    if (FIN_cpt >= SURE_FIN_TIMEOUT) goto end;
     // retransmitions if needed
     tv = p->timer;
     timer_in_micro = TIME_IN_MICRO(tv);
@@ -153,6 +151,12 @@ void *sender_thread(sure_socket_t *p) {
       // and reset the timer of the frame
       int N = NUMPACKETINWINDOW(p);
       int send_base = p->start_window;
+
+      // manage the fin_cpt
+      if ((p->buffer[send_base].flags | FIN) == 0) {
+        FIN_cpt++;
+      }
+
       for (int i = send_base; i < send_base + N; i++)
         udt_send(&p->udt, (char *)&p->buffer[p->start_window],
                  sizeof(p->buffer[p->start_window]));
@@ -180,7 +184,6 @@ void *sender_thread(sure_socket_t *p) {
         // here we are sure that the window will move thus setting the timer of
         // the new frame
         clock_gettime(CLOCK_MONOTONIC, &p->timer);
-        pthread_mutex_lock(&p->lock);
         while (true) {
           packet = p->buffer[p->start_window];
           // stop condition

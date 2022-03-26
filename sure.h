@@ -51,6 +51,10 @@
 
 #define NUMPACKETINWINDOW(p) p->num > SURE_WINDOW ? SURE_WINDOW : p->num
 
+#define SYN 0b001
+#define ACK 0b010
+#define FIN 0b100
+
 // this is the SURE segment
 // MODIFY THIS!!!
 typedef struct {
@@ -58,9 +62,14 @@ typedef struct {
   // Sequence number of ack number (depending on which side is sending)
   unsigned int seq_ack_number;
   unsigned char flags;  // [?|?|?|?|?|ACK|SYN|FIN]
+<<<<<<< HEAD
   unsigned short int packet_size;
+=======
+  unsigned short length;
+>>>>>>> e6b021b40637f462175f42d1fc8a7078a2055b3f
   char data[SURE_PACKET_SIZE];  // the payload
 } sure_packet_t;
+
 
 // this is the struct the application will provide to all SURE calls,
 // it MUST hold all the variables related to the connection (you may
@@ -74,15 +83,25 @@ typedef struct sure_socket {
   int start_window;            // start of the window
   int seq_number;              // seq of the next expected packet (for the send)
                                // seq of the current sent packet (for the rev)
+<<<<<<< HEAD
   pthread_mutex_t lock;        /* mutex lock for buffer */
   pthread_cond_t empty_buffer; /* condition signaling an empty buffer */
   pthread_cond_t full_buffer;  /* condition signaling a full buffer */
   pthread_cond_t space_buffer; /* condition signaling place in the buffer */
   pthread_cond_t no_empty_buffer; /* condition signaling that the buffer is no
                                      longer empty */
+=======
+  pthread_mutex_t lock;        /* lock for buffer and ... */
+  pthread_cond_t empty_buffer; /* wait for the buffer to be empty */
+  pthread_cond_t space_buffer; /* wait for the buffer to have space */
+>>>>>>> e6b021b40637f462175f42d1fc8a7078a2055b3f
   sure_packet_t buffer[SURE_BUFFER];
   udt_socket_t udt;  // used by the lower-level protocol
 } sure_socket_t;
+
+// SENDER :
+// need a condtion waiting for the buffer to be filled
+// need a lock on (BUFFER , NUM)
 
 // below are the interface the SURE protocol provides for applications
 // DO NO MODIFY!
