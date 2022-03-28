@@ -24,7 +24,7 @@
 // but in this limit we must fit the SURE header
 //(i.e. whatever else we want to add to sure_packet_t
 // MODIFY THIS!!!
-#define SURE_PACKET_SIZE UDT_PACKET_SIZE - 8
+#define SURE_PACKET_SIZE UDT_PACKET_SIZE - 12
 
 // the size of the buffer, you can modify this if you want
 #define SURE_BUFFER 64  // in number of packets, not bytes
@@ -51,50 +51,38 @@
 
 #define NUMPACKETINWINDOW(p) p->num > SURE_WINDOW ? SURE_WINDOW : p->num
 
-#define SYN 0b001
-#define ACK 0b010
-#define FIN 0b100
-
 // this is the SURE segment
 // MODIFY THIS!!!
 typedef struct {
   // ADD HEADER FIELDS HERE
-  // Sequence number of ack number (depending on which side is sending)
-  unsigned int seq_ack_number;
-  unsigned char flags;  // [?|?|?|?|?|ACK|SYN|FIN]
-<<<<<<< HEAD
-  unsigned short int packet_size;
-=======
-  unsigned short length;
->>>>>>> e6b021b40637f462175f42d1fc8a7078a2055b3f
+  // Sequence number of ack number (depending on which side is
+  // sending)
+  int seq_ack_number;
+  bool syn;
+  bool ack;
+  bool fin;
+  int packet_size;
   char data[SURE_PACKET_SIZE];  // the payload
 } sure_packet_t;
-
-
 // this is the struct the application will provide to all SURE calls,
 // it MUST hold all the variables related to the connection (you may
 // NOT declare them as global variables), for example the buffer
 // MODIFY THIS!!!
 typedef struct sure_socket {
   // ADD OTHER VARIABLES HERE
+  bool sender;
+  bool receiver;
   struct timespec timer;
   pthread_t thread_id;
   int num;                     // number of elements in the buffer
   int start_window;            // start of the window
   int seq_number;              // seq of the next expected packet (for the send)
                                // seq of the current sent packet (for the rev)
-<<<<<<< HEAD
   pthread_mutex_t lock;        /* mutex lock for buffer */
   pthread_cond_t empty_buffer; /* condition signaling an empty buffer */
-  pthread_cond_t full_buffer;  /* condition signaling a full buffer */
   pthread_cond_t space_buffer; /* condition signaling place in the buffer */
-  pthread_cond_t no_empty_buffer; /* condition signaling that the buffer is no
-                                     longer empty */
-=======
-  pthread_mutex_t lock;        /* lock for buffer and ... */
-  pthread_cond_t empty_buffer; /* wait for the buffer to be empty */
-  pthread_cond_t space_buffer; /* wait for the buffer to have space */
->>>>>>> e6b021b40637f462175f42d1fc8a7078a2055b3f
+  pthread_cond_t filled_buffer; /* condition signaling that the buffer
+                                   is no longer empty */
   sure_packet_t buffer[SURE_BUFFER];
   udt_socket_t udt;  // used by the lower-level protocol
 } sure_socket_t;

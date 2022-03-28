@@ -9,13 +9,13 @@ OTHER_SRC = ./copy_file.c \
 OBJ = $(SRC:.c=.o) 
 OTHER_OBJ = $(OTHER_SRC:.c=.o)
 
-CFLAGS += -Wall -Wextra -DDEBUG_EMULATION=1
-CFLAGS += -D_GNU_SOURCE -D_REENTRANT
+CFLAGS += -g -Wall -Wextra 
+# CFLAGS += -DDEBUG_EMULATION=1 -D_GNU_SOURCE -D_REENTRANT
 
 LDLIBS += -lpthread 
 
 copy: $(OBJ) $(OTHER_OBJ)
-	gcc $(LDLIBS) -o copy_file copy_file.o $(OBJ) $(LDLIBS)
+	gcc $(CFLAGS)  $(LDLIBS)  -o copy_file copy_file.o $(OBJ) $(LDLIBS) 
 
 receive: $(OBJ) $(OTHER_OBJ)
 	gcc $(LDLIBS) -o receive_file receive_file.o $(OBJ) $(LDLIBS)
