@@ -68,7 +68,7 @@ typedef struct {
 // it MUST hold all the variables related to the connection (you may
 // NOT declare them as global variables), for example the buffer
 // MODIFY THIS!!!
-typedef struct sure_socket {
+typedef struct {
   // ADD OTHER VARIABLES HERE
   bool sender;
   bool receiver;
@@ -81,8 +81,8 @@ typedef struct sure_socket {
   pthread_mutex_t lock;        /* mutex lock for buffer */
   pthread_cond_t empty_buffer; /* condition signaling an empty buffer */
   pthread_cond_t space_buffer; /* condition signaling place in the buffer */
-  pthread_cond_t filled_buffer; /* condition signaling that the buffer
-                                   is no longer empty */
+  pthread_cond_t filled_buffer; /* condition signaling that the buffer  is no
+                                   longer empty */
   sure_packet_t buffer[SURE_BUFFER];
   udt_socket_t udt;  // used by the lower-level protocol
 } sure_socket_t;

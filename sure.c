@@ -39,7 +39,11 @@ int sure_read(sure_socket_t *s, char *msg, int msg_size) {
   int total = 0;
   pthread_mutex_lock(&s->lock);
   if (s->num == 0) pthread_cond_wait(&s->filled_buffer, &s->lock);
-  if (s->num == 0) return 0;
+  /* manage the fin condition */
+  if (s->buffer[s->start_window].fin) {
+    pthread_mutex_unlock(&s->lock);
+    return 0;
+  }
   while (s->num > 0 && s->buffer[s->start_window].packet_size < msg_size) {
     packet_size = s->buffer[s->start_window].packet_size;
     memcpy(msg, &s->buffer[s->start_window].data, packet_size);
@@ -47,10 +51,10 @@ int sure_read(sure_socket_t *s, char *msg, int msg_size) {
     msg_size = msg_size - packet_size;
     msg = &msg[packet_size];
     /* UPDATE the struct */
-    printf("number of elements in the buffer : %d ", s->num);
     s->num--;
     s->start_window = (s->start_window + 1) % SURE_BUFFER;
   }
+  printf("number of elements in the buffer : (%d) \n", s->num);
   if (s->num == 0) pthread_cond_signal(&s->empty_buffer);
   if (s->num < SURE_BUFFER) pthread_cond_signal(&s->space_buffer);
   pthread_mutex_unlock(&s->lock);
@@ -68,32 +72,21 @@ int sure_write(sure_socket_t *s, char *msg, int msg_size) {
   int send_status;
   int data_left = msg_size;
   pthread_mutex_lock(&s->lock);
-  int i = 0;
-  int total = 0;
   while (data_left > 0) {
-    i++;
     while (s->num == SURE_BUFFER) pthread_cond_wait(&s->space_buffer, &s->lock);
     /* compute useful values for the packet and the while loop */
     add_index = (s->start_window + s->num) % SURE_BUFFER;
     packet_size =
         data_left < (SURE_PACKET_SIZE) ? data_left : (SURE_PACKET_SIZE);
     data_left = data_left - packet_size;
-    total = total + packet_size;
     /* copy data into the buffer's packet dans move the msg pointer */
     memcpy(&(s->buffer[add_index].data), msg, packet_size);
-    printf("content of the packet : \n");
-    for (int i = 0; i < packet_size; i++) {
-      printf("%c", s->buffer[add_index].data[i]);
-    }
-    printf("\n");
-    /* set the header of the packet */
     s->buffer[add_index].ack = false;
     s->buffer[add_index].fin = false;
     s->buffer[add_index].syn = false;
     s->buffer[add_index].packet_size = packet_size;
     s->buffer[add_index].seq_ack_number = s->seq_number;
-    printf("writing packet packet n° ( %d ) to buffer \n", s->seq_number);
-
+    printf("writing packet n° ( %d ) to buffer \n", s->seq_number);
     /* if num == 0 then set the timer (since we are starting a new frame)*/
     /* we also need  to signal that the buffer is no longer empty */
     if (s->num == 0) {
@@ -111,13 +104,12 @@ int sure_write(sure_socket_t *s, char *msg, int msg_size) {
     s->seq_number++;
     s->num++;
   }
-  printf("number of elements in the buffer after read :%d  \n", s->num);
-  printf("we have added :%d elements  \n", i);
-  printf("size of the buffer : %d \n", s->num);
-  printW(s);
-
+  printf("number of elements in the buffer after read :%d  \n\n", s->num);
+  // printf("we have added :%d elements  \n", i);
+  // printf("size of the buffer : %d \n", s->num);
+  // printW(s);
   pthread_mutex_unlock(&s->lock);
-  return (total);
+  return (msg_size - data_left);
 }
 // thread that receive packets and add them to the buffer
 void *receiver_thread(sure_socket_t *p) {
@@ -129,12 +121,6 @@ void *receiver_thread(sure_socket_t *p) {
   while (true) {
     recv_status = udt_recv(&p->udt, (char *)&packet_recv, sizeof(packet_recv));
     if (recv_status > 0) {
-      // printf(
-      //     "recv : [flags : (syn : %d) (ack %d) (fin %d)] [seqence number : %d
-      //     "
-      //     "]\n",
-      //     packet_recv.syn, packet_recv.ack, packet_recv.fin,
-      //     packet_recv.seq_ack_number);
       pthread_mutex_lock(&p->lock);
       if (packet_recv.syn) {
         // manage the lost of the syn/ack packet
@@ -149,46 +135,39 @@ void *receiver_thread(sure_socket_t *p) {
         continue;
       }
       // the sender wish to end the connexion
-      if (packet_recv.fin) {
-        // Ending the connection means receiving a FIN packet, responding with
-        // an ack and then waiting for some time before tearing down the
-        // connection (in case the ack was lost and the sender re-transmits the
-        // FIN).
-        udt_set_timeout(&p->udt, 4 * SURE_TIMEOUT);
+      if (packet_recv.fin && packet_recv.seq_ack_number == p->seq_number) {
+        udt_set_timeout(&p->udt, 2 * SURE_TIMEOUT);
         packet_sent.ack = true;
         packet_sent.fin = true;
         packet_sent.syn = false;
         packet_sent.packet_size = 0;
         packet_sent.seq_ack_number = packet_recv.seq_ack_number + 1;
+        // buffer the packet to tell read we are ending the file transfer
+        add_index = (p->start_window + p->num) % SURE_BUFFER;
+        p->buffer[add_index] = packet_recv;
+        p->num++;
         // still have to manage errors here
-        do {
+        recv_status = 0;
+        for (int i = 0; i < SURE_FIN_TIMEOUT && recv_status != UDT_TIMEOUT;
+             i++) {
           udt_send(&p->udt, (char *)&packet_sent, sizeof(packet_sent));
           recv_status =
               udt_recv(&p->udt, (char *)&packet_recv, sizeof(packet_recv));
-
-        } while (recv_status != UDT_TIMEOUT);
+        }
+        printf("the recv thread is ending with %d elements in the buffer \n\n",
+               p->num);
         pthread_cond_signal(&p->filled_buffer);
         pthread_mutex_unlock(&p->lock);
         return NULL;
       }
-      if (packet_recv.ack) {
-        fprintf(stderr, "we cannot ack anything soething went wrong \n");
-      }
-      // here we know we received data therefor we should buffer it.
-      // first check if the right packet has arrived to us :
       if (packet_recv.seq_ack_number == p->seq_number) {
-        // wait on the buffer to have space
-        // printf("rt : buffer packet %d \n", p->seq_number);
         if (p->num == SURE_BUFFER)
           pthread_cond_wait(&p->space_buffer, &p->lock);
         add_index = (p->start_window + p->num) % SURE_BUFFER;
-        // printf("add_index : %d \n", add_index);
-        // printf("nb ele in buf : %d \n\n\n", p->num);
         p->buffer[add_index] = packet_recv;
         if (p->num == 0) pthread_cond_signal(&p->filled_buffer);
         p->num++;
         p->seq_number++;
-        /* send an ack for the received packet with the right seq number */
       }
       // we send a packet telling the sender the next packet we are
       // next are expecting
@@ -196,12 +175,6 @@ void *receiver_thread(sure_socket_t *p) {
       packet_sent.fin = false;
       packet_sent.syn = false;
       packet_sent.seq_ack_number = p->seq_number;
-      // printf(
-      //     "send : [flags : (syn : %d) (ack %d) (fin %d)] [seqence number : %d
-      //     "
-      //     "]\n",
-      //     packet_sent.syn, packet_sent.ack, packet_sent.fin,
-      //     packet_sent.seq_ack_number);
       packet_sent.packet_size = 0;
       udt_send(&p->udt, (char *)&packet_sent, sizeof(packet_sent));
       pthread_mutex_unlock(&p->lock);
@@ -223,7 +196,7 @@ void *sender_thread(sure_socket_t *p) {
   int fin_cpt = 0;
 
   while (true) {
-    if (fin_cpt > SURE_FIN_TIMEOUT) goto end;
+    if (fin_cpt >= SURE_FIN_TIMEOUT) goto end;
     pthread_mutex_lock(&p->lock);
     // if there is no packets in the buffer we shall wait for the buffer to be
     // filled
@@ -234,52 +207,48 @@ void *sender_thread(sure_socket_t *p) {
     timer_in_micro = TIME_IN_MICRO(tv);
     clock_gettime(CLOCK_MONOTONIC, &tv);
     current_time = TIME_IN_MICRO(tv);
-
     // check if there is a timeout
     if (SURE_TIMEOUT < (current_time - timer_in_micro)) {
       // start retransmitting all the window as defined in GO-BACK-N
       // and reset the timer of the frame
-
       int N = p->num > SURE_WINDOW ? SURE_WINDOW : p->num;
       int send_base = p->start_window;
 
       // manage the fin_cpt
       if (p->buffer[p->start_window].fin) fin_cpt++;
-      printf("retransmitting packets :");
+      printf("retransmitting packets \n\n");
       for (int i = send_base; i < (send_base + N); i++) {
+        printf("| %d | ", p->buffer[i % SURE_BUFFER].seq_ack_number);
         udt_send(&p->udt, (char *)&p->buffer[i % SURE_BUFFER],
                  sizeof(p->buffer[i % SURE_BUFFER]));
       }
-      printW(p);
+      printf("\n");
       clock_gettime(CLOCK_MONOTONIC, &p->timer);
     }
     // if no packet timed out , we can in the  spare time check for acks and
     // move the window (the time we can afford to wait is
     // current_time - current_time)
 
-    if (p->num == 0) pthread_cond_signal(&p->empty_buffer);
-    if (p->num < SURE_BUFFER) pthread_cond_signal(&p->space_buffer);
     pthread_mutex_unlock(&p->lock);
     udt_set_timeout(&p->udt, current_time - timer_in_micro);
     recv_status = udt_recv(&p->udt, (char *)&last_ack, sizeof(last_ack));
     pthread_mutex_lock(&p->lock);
     if (recv_status > 0) {
-      printf(
-          "recv :[flags : (syn : %d) (ack %d) (fin %d)] [seqence number : %d "
-          "]\n",
-          last_ack.syn, last_ack.ack, last_ack.fin, last_ack.seq_ack_number);
-      /* check  flags  */
-      if (p->num == 0) printf("BIG ERROR WITH THE CONDITION \n");
-
+      if (p->num == 0) fprintf(stderr, "BIG ERROR WITH THE CONDITION \n");
       /* we must end the connexion (we assume that no packet was sent from us
         after the fin.) */
-      if (last_ack.fin && last_ack.ack) {
+      if (last_ack.fin && last_ack.ack &&
+          last_ack.seq_ack_number == p->seq_number) {
       end:
         if (p->num > 1) {
           fprintf(stderr,
-                  "The sender wants to end the connexion but there is still "
+                  "The recv wants to end the connexion but there is still "
                   "packets in the buffer \n");
         }
+        printf("ended the connexion after %d retransmit of the fin packet \n",
+               fin_cpt);
+        p->num--;
+        p->start_window = (p->start_window + 1) % SURE_BUFFER;
         pthread_mutex_unlock(&p->lock);
         return NULL;
       }
@@ -318,7 +287,8 @@ void *sender_thread(sure_socket_t *p) {
 int sure_init(char *receiver, int port, int side, sure_socket_t *p) {
   // fill the sure_socket_t
   // call udt_init
-  int status = udt_init(receiver, port, side, &p->udt);
+  printf("%p\n", &(p->udt));
+  int status = udt_init(receiver, port, side, &(p->udt));
   if (status == UDT_FAILURE) return SURE_FAILURE;
   p->num = 0;
   p->seq_number = 0;
@@ -433,6 +403,7 @@ void sure_close(sure_socket_t *s) {
   s->buffer[add_index] = fin_packet;
   s->num++;
   s->seq_number++;
+  clock_gettime(CLOCK_MONOTONIC, &s->timer);
   udt_send(&s->udt, (char *)&fin_packet, sizeof(fin_packet));
   pthread_cond_signal(&s->filled_buffer);
   pthread_mutex_unlock(&s->lock);

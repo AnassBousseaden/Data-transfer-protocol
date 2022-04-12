@@ -33,7 +33,6 @@ int main(int argc, char *argv[]) {
     // create our "socket" using our SURE protocol (and establish the
     // connection)
     ret = sure_init(NULL, PORT, SURE_RECEIVER, &s);
-    printf("%d\n", ret);
     if (ret != SURE_SUCCESS) exit(EXIT_FAILURE);
     // make the name of the file
     file_count++;

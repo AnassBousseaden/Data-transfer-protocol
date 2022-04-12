@@ -19,7 +19,6 @@
 
 #include "sure.h"
 
-#define SERVER "127.0.0.1
 #define APP_MSG_SIZE 1024
 #define PORT 3001
 
@@ -46,9 +45,6 @@ int main(int argc, char *argv[]) {
   if (fd < 0) usage(argv[0]);
   // create our "socket" using our SURE protocol (and establish the connection)
   ret = sure_init(argv[1], PORT, SURE_SENDER, &s);
-  printf(" the return value of init  is :%d \n", ret);
-
-  return EXIT_SUCCESS;
   if (ret != SURE_SUCCESS) exit(EXIT_FAILURE);
   // read and send the file using our socket
   clock_gettime(CLOCK_MONOTONIC, &before);
