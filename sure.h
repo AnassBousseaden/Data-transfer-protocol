@@ -70,17 +70,16 @@ typedef struct {
 // MODIFY THIS!!!
 typedef struct {
   // ADD OTHER VARIABLES HERE
-  bool sender;
   bool receiver;
-  struct timespec timer;
+  struct timespec timers[SURE_BUFFER]; /* timer for each packet in the window */
   pthread_t thread_id;
-  int num;                     // number of elements in the buffer
-  int start_window;            // start of the window
-  int seq_number;              // seq of the next expected packet (for the send)
-                               // seq of the current sent packet (for the rev)
-  pthread_mutex_t lock;        /* mutex lock for buffer */
-  pthread_cond_t empty_buffer; /* condition signaling an empty buffer */
-  pthread_cond_t space_buffer; /* condition signaling place in the buffer */
+  int num;                      // number of elements in the buffer
+  int start_window;             // start of the window
+  int seq_number;               // next available sequence number (for the send)
+                                // seq of the current sent packet (for the rev)
+  pthread_mutex_t lock;         /* mutex lock for common resources */
+  pthread_cond_t empty_buffer;  /* condition signaling an empty buffer */
+  pthread_cond_t space_buffer;  /* condition signaling place in the buffer */
   pthread_cond_t filled_buffer; /* condition signaling that the buffer  is no
                                    longer empty */
   sure_packet_t buffer[SURE_BUFFER];
