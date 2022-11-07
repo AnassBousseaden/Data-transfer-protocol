@@ -3,11 +3,6 @@
  * fictitious SURE protocol.
  * This side (the receiver side) must be running
  * before the other side (copy_file) is called.
- * Author: Francieli Boito, February 2022
- * This file was prepared for a teaching activity,
- * you CANNOT share it online (for instance, in
- * a forum or in a git repo) unless you receive
- * explicit authorization from the author.
  */
 #include <fcntl.h>
 #include <stdio.h>

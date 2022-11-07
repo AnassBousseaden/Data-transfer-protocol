@@ -3,12 +3,8 @@
  * using our fictitious SURE protocol.
  * The receiver-side (receive_file.c) must be
  * running before calling the sender-side.
- * Author: Francieli Boito, February 2022
- * This file was prepared for a teaching activity,
- * you CANNOT share it online (for instance, in
- * a forum or in a git repo) unless you receive
- * explicit authorization from the author.
  */
+
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
