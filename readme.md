@@ -27,11 +27,15 @@ Les programme copy_file et receive_file sont un exemple d'utilisation du protoco
 d'un hôte (copy_file) vers un autre (receive_file).
 
 
-####### Pour tester le protocole avec copy_file et receive_file:
-    - générer le makefile avec la commande  **_cmake._** .
-    - générer les fichiers **_copy_file_** et **_reveive_file_** avec la commande: **_make copy_file_**;**_make reveive_file_**;
-    - Executer la commande : **_./receive_file_**, sur une machine A.
-    - Executer la commande **_./copy_file IP(A) file_**, sur une autre machine (A par exemple) ou **IP(A)** est l'adresse ip
-    de A sur le reseau et **file** est le fichier a envoyé.
-    Par exemple : **_./copy_file 127.0.0.1 1.send_** pour le faire sur la même machine.
+###### Pour tester le protocole avec copy_file et receive_file:
+
+-Générer le makefile avec la commande  **_cmake._** .
+
+-Générer les fichiers **_copy_file_** et **_reveive_file_** avec la commande: **_make copy_file_**;**_make reveive_file_**;
+
+-Executer la commande : **_./receive_file_**, sur une machine A.
+
+-Executer la commande **_./copy_file IP(A) file_**, sur une autre machine (A par exemple) ou **IP(A)** est l'adresse ip de A sur le reseau et **file** est le fichier a envoyé.
+
+Par exemple : **_./copy_file 127.0.0.1 1.send_** pour le faire sur la même machine.
 
