@@ -27,7 +27,7 @@ Les programme copy_file et receive_file sont un exemple d'utilisation du protoco
 d'un hôte (copy_file) vers un autre (receive_file).
 
 
-Pour tester le protocole avec copy_file et receive_file:
+####### Pour tester le protocole avec copy_file et receive_file:
     - générer le makefile avec la commande  **_cmake._** .
     - générer les fichiers **_copy_file_** et **_reveive_file_** avec la commande: **_make copy_file_**;**_make reveive_file_**;
     - Executer la commande : **_./receive_file_**, sur une machine A.
